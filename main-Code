@@ -2,61 +2,48 @@
 #include <Adafruit_NeoPixel.h>
 
 // =====================================
-// 핀 설정
+// 1. 핀 설정
 // =====================================
-#define LED_PIN 6
-#define LED_COUNT 180
+#define LED_PIN       6
+#define LED_COUNT     180
+#define TRIG_PIN      9
+#define ECHO_PIN      10
+#define BRAKE_PIN     2
+#define RELAY_PIN     5
 
-#define TRIG_PIN 9
-#define ECHO_PIN 10
-
-#define BRAKE_PIN 2
-#define RELAY_PIN 5
-
-// 기존 릴레이 모듈 기준
-// LOW = 릴레이 ON
-// HIGH = 릴레이 OFF
-const int RELAY_ON = LOW;
-const int RELAY_OFF = HIGH;
+// Active LOW 릴레이
+#define RELAY_ON      LOW
+#define RELAY_OFF     HIGH
 
 // =====================================
-// 거리 설정 (cm)
+// 2. 거리 설정
 // =====================================
-const float CRITICAL_DIST = 150.0;
-const float DANGER_DIST = 200.0;
-const float WARNING_DIST = 300.0;
+const float EMERGENCY_DIST = 50.0;
+const float EMERGENCY_RELEASE_DIST = 60.0;
 
-const float HYSTERESIS = 5.0;
-
-// 긴급제동 테스트 기준
-const float EMERGENCY_DIST = 100.0;
-const float EMERGENCY_RELEASE_DIST = 110.0;
+const float RED_DIST = 100.0;
+const float ORANGE_DIST = 200.0;
+const float GREEN_DIST = 300.0;
 
 // =====================================
-// 시간 설정
+// 3. 시간 설정
 // =====================================
 const unsigned long SENSOR_INTERVAL = 300;
-const unsigned long ECHO_TIMEOUT_US = 25000UL;
-
 const unsigned long BRAKE_DEBOUNCE = 30;
-const unsigned long DOUBLE_PRESS_MS = 1000;
+const unsigned long ECHO_TIMEOUT_US = 30000UL;
 
-// =====================================
-// 기타 설정
-// =====================================
-const int ERROR_LIMIT = 3;
 const int BRIGHTNESS = 10;
 
+// =====================================
+// 4. LED 설정
+// =====================================
 Adafruit_NeoPixel strip(
   LED_COUNT,
   LED_PIN,
   NEO_GRB + NEO_KHZ800
 );
 
-// =====================================
-// LED 단계
-// =====================================
-enum WarningLevel {
+enum LedLevel {
   SAFE,
   WARNING,
   DANGER,
@@ -65,419 +52,356 @@ enum WarningLevel {
   BRAKE_ACTIVE
 };
 
-WarningLevel currentLevel = SAFE;
-WarningLevel sensorLevel = SENSOR_ERROR;
-WarningLevel lastValidLevel = SENSOR_ERROR;
+LedLevel currentLevel = SENSOR_ERROR;
+
+unsigned long lastBlinkTime = 0;
+bool blinkOn = false;
+
+// =====================================
+// 5. 초음파 센서 상태
+// =====================================
+float distanceCm = -1;
+bool sensorValid = false;
 
 unsigned long lastSensorTime = 0;
-unsigned long lastBlinkTime = 0;
-
-bool ledOn = false;
-int errorCount = 0;
 
 // =====================================
-// 브레이크 입력 상태
+// 6. 브레이크 입력 상태
 // =====================================
 bool brakePressed = false;
-bool lastBrakeRaw = false;
-
-unsigned long lastBrakeChangeTime = 0;
-unsigned long firstPressTime = 0;
-
-bool waitingSecondPress = false;
-bool resetRequested = false;
+bool lastBrakeReading = false;
+unsigned long lastDebounceTime = 0;
 
 // =====================================
-// 릴레이 테스트 상태
+// 7. 릴레이 제어 상태
 // =====================================
-bool stopLatched = false;
-bool obstacleDetected = false;
-bool sensorFault = true;
 
-float distanceCm = -1.0;
+// 일반 수동 브레이크 토글
+bool manualStop = false;
+
+// 긴급제동 상태
+bool emergencyStop = true;
+
+// 긴급제동 수동 해제 상태
+// true = 긴급제동 일시 해제
+bool emergencyOverride = false;
+
+// 현재 릴레이 상태
+bool relayOn = true;
 
 // =====================================
-// 초음파 거리 측정
+// 8. 초음파 거리 측정
 // =====================================
 float readDistance() {
 
   digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(5);
+  delayMicroseconds(3);
 
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  unsigned long duration =
-    pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
+  unsigned long duration = pulseIn(
+    ECHO_PIN,
+    HIGH,
+    ECHO_TIMEOUT_US
+  );
 
+  // 초음파 응답 없음
   if (duration == 0) {
-    return -1.0;
+    return -1;
   }
 
-  float d = duration * 0.0343 / 2.0;
+  float cm = duration * 0.0343 / 2.0;
 
-  if (d < 2.0 || d > 400.0) {
-    return -1.0;
+  // 측정 범위 오류
+  if (cm < 2.0 || cm > 400.0) {
+    return -1;
   }
 
-  return d;
+  return cm;
 }
 
 // =====================================
-// 거리별 LED 단계
-// =====================================
-WarningLevel determineLevel(float d) {
-
-  if (d < CRITICAL_DIST) {
-    return CRITICAL;
-  }
-
-  if (d < DANGER_DIST) {
-    return DANGER;
-  }
-
-  if (d <= WARNING_DIST) {
-    return WARNING;
-  }
-
-  return SAFE;
-}
-
-// =====================================
-// LED 히스테리시스
-// =====================================
-WarningLevel applyHysteresis(
-  float d,
-  WarningLevel previous
-) {
-
-  if (previous == SENSOR_ERROR) {
-    return determineLevel(d);
-  }
-
-  switch (previous) {
-
-    case SAFE:
-      return determineLevel(d);
-
-    case WARNING:
-      if (d < DANGER_DIST) {
-        return determineLevel(d);
-      }
-
-      if (d <= WARNING_DIST + HYSTERESIS) {
-        return WARNING;
-      }
-
-      return SAFE;
-
-    case DANGER:
-      if (d < CRITICAL_DIST) {
-        return CRITICAL;
-      }
-
-      if (d < DANGER_DIST + HYSTERESIS) {
-        return DANGER;
-      }
-
-      return determineLevel(d);
-
-    case CRITICAL:
-      if (d < CRITICAL_DIST + HYSTERESIS) {
-        return CRITICAL;
-      }
-
-      return determineLevel(d);
-
-    default:
-      return determineLevel(d);
-  }
-}
-
-// =====================================
-// LED 색상
-// =====================================
-uint32_t getColor(WarningLevel level) {
-
-  switch (level) {
-
-    case WARNING:
-      return strip.Color(0, 255, 0);
-
-    case DANGER:
-      return strip.Color(255, 60, 0);
-
-    case CRITICAL:
-    case BRAKE_ACTIVE:
-      return strip.Color(255, 0, 0);
-
-    case SENSOR_ERROR:
-      return strip.Color(0, 0, 255);
-
-    default:
-      return 0;
-  }
-}
-
-// =====================================
-// LED 점멸 간격
-// =====================================
-unsigned long getBlinkInterval(
-  WarningLevel level
-) {
-
-  switch (level) {
-
-    case WARNING:
-      return 500;
-
-    case DANGER:
-      return 150;
-
-    case CRITICAL:
-      return 100;
-
-    case SENSOR_ERROR:
-      return 250;
-
-    default:
-      return 0;
-  }
-}
-
-// =====================================
-// 브레이크 스위치 입력
+// 9. 브레이크 버튼 처리
 // =====================================
 void updateBrake() {
 
-  unsigned long now = millis();
+  bool reading =
+    digitalRead(BRAKE_PIN) == LOW;
 
-  bool rawPressed =
-    (digitalRead(BRAKE_PIN) == LOW);
-
-  if (rawPressed != lastBrakeRaw) {
-    lastBrakeRaw = rawPressed;
-    lastBrakeChangeTime = now;
+  if (reading != lastBrakeReading) {
+    lastDebounceTime = millis();
   }
 
-  if (now - lastBrakeChangeTime < BRAKE_DEBOUNCE) {
+  if (millis() - lastDebounceTime <
+      BRAKE_DEBOUNCE) {
+
+    lastBrakeReading = reading;
     return;
   }
 
-  if (rawPressed == brakePressed) {
-    return;
-  }
+  if (reading != brakePressed) {
 
-  brakePressed = rawPressed;
+    brakePressed = reading;
 
-  if (brakePressed) {
+    if (brakePressed) {
 
-    // 브레이크 입력 시 정지 요청 유지
-    stopLatched = true;
+      Serial.println("BRAKE PRESSED");
 
-    if (waitingSecondPress &&
-        now - firstPressTime <= DOUBLE_PRESS_MS) {
+      // =================================
+      // 긴급제동 중 버튼을 누른 경우
+      // =================================
+      if (emergencyStop && !emergencyOverride) {
 
-      waitingSecondPress = false;
-      resetRequested = true;
+        emergencyOverride = true;
 
-      Serial.println(
-        "DOUBLE PRESS -> RESET REQUEST"
-      );
+        // 수동 정지도 해제
+        manualStop = false;
+
+        Serial.println("EMERGENCY OVERRIDE ON");
+        Serial.println("MANUAL STOP OFF");
+
+      } else {
+
+        // 일반 상황에서는 기존 토글 유지
+        manualStop = !manualStop;
+
+        Serial.println(
+          manualStop
+            ? "MANUAL STOP ON"
+            : "MANUAL STOP OFF"
+        );
+      }
 
     } else {
 
-      waitingSecondPress = true;
-      firstPressTime = now;
-
-      Serial.println(
-        "BRAKE PRESSED -> STOP"
-      );
+      Serial.println("BRAKE RELEASED");
     }
-
-  } else {
-
-    Serial.println("BRAKE RELEASED");
   }
+
+  lastBrakeReading = reading;
 }
 
 // =====================================
-// 초음파 센서 갱신
+// 10. 초음파 센서 갱신
 // =====================================
 void updateSensor() {
 
-  unsigned long now = millis();
-
-  if (now - lastSensorTime < SENSOR_INTERVAL) {
+  if (millis() - lastSensorTime <
+      SENSOR_INTERVAL) {
     return;
   }
 
-  lastSensorTime = now;
+  lastSensorTime = millis();
 
-  distanceCm = readDistance();
+  float measured = readDistance();
 
-  if (distanceCm < 0) {
+  // =================================
+  // NO ECHO 처리
+  // =================================
+  if (measured < 0) {
 
-    errorCount++;
+    sensorValid = false;
+    distanceCm = -1;
 
-    Serial.println("Distance: ERROR");
+    Serial.println("Distance: NO ECHO");
 
-    if (errorCount >= ERROR_LIMIT) {
-      sensorFault = true;
-      sensorLevel = SENSOR_ERROR;
-      stopLatched = true;
-    }
-
+    // 기존 긴급제동 상태 유지
     return;
   }
 
-  errorCount = 0;
-  sensorFault = false;
-
-  sensorLevel =
-    applyHysteresis(distanceCm, lastValidLevel);
-
-  lastValidLevel = sensorLevel;
-
-  // 장애물 감지
-  if (distanceCm < EMERGENCY_DIST) {
-
-    obstacleDetected = true;
-    stopLatched = true;
-
-  } else if (distanceCm >=
-             EMERGENCY_RELEASE_DIST) {
-
-    obstacleDetected = false;
-  }
+  distanceCm = measured;
+  sensorValid = true;
 
   Serial.print("Distance: ");
-  Serial.print(distanceCm);
+  Serial.print(distanceCm, 1);
   Serial.println(" cm");
+
+  // =================================
+  // 60cm 이상: 긴급제동 해제 및 재무장
+  // =================================
+  if (distanceCm >= EMERGENCY_RELEASE_DIST) {
+
+    if (emergencyStop) {
+      Serial.println("EMERGENCY RELEASED");
+    }
+
+    emergencyStop = false;
+
+    if (emergencyOverride) {
+      emergencyOverride = false;
+      Serial.println("EMERGENCY OVERRIDE RESET");
+    }
+  }
+
+  // =================================
+  // 50cm 미만: 긴급제동
+  // =================================
+  else if (distanceCm < EMERGENCY_DIST) {
+
+    if (!emergencyOverride) {
+
+      if (!emergencyStop) {
+        Serial.println("EMERGENCY STOP");
+      }
+
+      emergencyStop = true;
+    }
+  }
+
+  // 50~60cm에서는 기존 상태 유지
 }
 
 // =====================================
-// 릴레이 테스트 제어
+// 11. 실제 릴레이 제어
 // =====================================
 void updateRelay() {
 
-  unsigned long now = millis();
+  // 긴급제동 수동 해제 중에는
+  // 자동 긴급제동 신호를 릴레이에 반영하지 않음
+  bool effectiveEmergencyStop =
+    emergencyStop && !emergencyOverride;
 
-  if (waitingSecondPress &&
-      now - firstPressTime > DOUBLE_PRESS_MS) {
+  bool shouldStop =
+    manualStop ||
+    effectiveEmergencyStop ||
+    brakePressed;
 
-    waitingSecondPress = false;
-  }
+  if (shouldStop != relayOn) {
 
-  // 해제 요청은 모든 조건이 충족될 때만
-  if (resetRequested &&
-      !brakePressed &&
-      !obstacleDetected &&
-      !sensorFault &&
-      distanceCm >= EMERGENCY_RELEASE_DIST) {
+    relayOn = shouldStop;
 
-    stopLatched = false;
-    resetRequested = false;
+    digitalWrite(
+      RELAY_PIN,
+      relayOn ? RELAY_ON : RELAY_OFF
+    );
 
     Serial.println(
-      "STOP RESET -> RELAY OFF"
+      relayOn
+        ? "RELAY ON"
+        : "RELAY OFF"
     );
   }
-
-  bool relayOn =
-    stopLatched ||
-    brakePressed ||
-    obstacleDetected ||
-    sensorFault;
-
-  digitalWrite(
-    RELAY_PIN,
-    relayOn ? RELAY_ON : RELAY_OFF
-  );
 }
 
 // =====================================
-// LED 우선순위
+// 12. LED 상태 결정
 // =====================================
-WarningLevel getPriorityLevel() {
+LedLevel getPriorityLevel() {
 
+  // 버튼을 누르는 동안 빨간색 고정
   if (brakePressed) {
     return BRAKE_ACTIVE;
   }
 
-  return sensorLevel;
+  // NO ECHO: 초록색 점멸
+  if (!sensorValid) {
+    return WARNING;
+  }
+
+  // 100cm 이하: 빨간색 점멸
+  if (distanceCm <= RED_DIST) {
+    return CRITICAL;
+  }
+
+  // 100cm 초과: 주황색 점멸
+  return DANGER;
 }
 
 // =====================================
-// LED 상태 변경
+// 13. LED 전체 출력
 // =====================================
-void setLevel(WarningLevel newLevel) {
+void showColor(uint32_t color) {
 
-  if (newLevel == currentLevel) {
-    return;
-  }
-
-  currentLevel = newLevel;
-  lastBlinkTime = millis();
-
-  if (currentLevel == SAFE) {
-
-    ledOn = false;
-    strip.clear();
-
-  } else {
-
-    ledOn = true;
-    strip.fill(getColor(currentLevel));
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.setPixelColor(i, color);
   }
 
   strip.show();
 }
 
 // =====================================
-// LED 점멸
+// 14. LED 점멸 제어
 // =====================================
 void updateLED() {
 
-  if (currentLevel == BRAKE_ACTIVE ||
-      currentLevel == SAFE) {
+  LedLevel level = getPriorityLevel();
+
+  if (level != currentLevel) {
+
+    currentLevel = level;
+    lastBlinkTime = millis();
+    blinkOn = false;
+  }
+
+  if (level == SAFE) {
+
+    showColor(strip.Color(0, 0, 0));
     return;
   }
 
-  unsigned long now = millis();
+  // 브레이크 누름: 빨간색 고정
+  if (level == BRAKE_ACTIVE) {
 
-  unsigned long interval =
-    getBlinkInterval(currentLevel);
+    showColor(strip.Color(255, 0, 0));
+    return;
+  }
 
-  if (now - lastBlinkTime >= interval) {
+  unsigned long interval = 500;
+  uint32_t color = 0;
 
-    lastBlinkTime = now;
-    ledOn = !ledOn;
+  switch (level) {
 
-    if (ledOn) {
-      strip.fill(getColor(currentLevel));
-    } else {
-      strip.clear();
-    }
+    case CRITICAL:
+      interval = 100;
+      color = strip.Color(255, 0, 0);
+      break;
 
-    strip.show();
+    case DANGER:
+      interval = 150;
+      color = strip.Color(255, 80, 0);
+      break;
+
+    case WARNING:
+      interval = 500;
+      color = strip.Color(0, 255, 0);
+      break;
+
+    case SENSOR_ERROR:
+      interval = 250;
+      color = strip.Color(0, 0, 255);
+      break;
+
+    default:
+      break;
+  }
+
+  if (millis() - lastBlinkTime >= interval) {
+
+    lastBlinkTime = millis();
+    blinkOn = !blinkOn;
+
+    showColor(
+      blinkOn
+        ? color
+        : strip.Color(0, 0, 0)
+    );
   }
 }
 
 // =====================================
-// 초기 설정
+// 15. 초기 설정
 // =====================================
 void setup() {
 
   Serial.begin(9600);
 
-  // 초기 릴레이 OFF 설정
-  digitalWrite(RELAY_PIN, RELAY_OFF);
+  // 초기 릴레이 ON
+  digitalWrite(RELAY_PIN, RELAY_ON);
   pinMode(RELAY_PIN, OUTPUT);
 
   pinMode(BRAKE_PIN, INPUT_PULLUP);
-
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
@@ -489,39 +413,38 @@ void setup() {
   strip.show();
 
   brakePressed =
-    (digitalRead(BRAKE_PIN) == LOW);
+    digitalRead(BRAKE_PIN) == LOW;
 
-  lastBrakeRaw = brakePressed;
-  lastBrakeChangeTime = millis();
+  lastBrakeReading = brakePressed;
 
-  // 센서 확인 전 정지 요청 상태
-  sensorFault = true;
-  stopLatched = true;
-
-  currentLevel = SAFE;
-  sensorLevel = SENSOR_ERROR;
-
-  setLevel(getPriorityLevel());
+  manualStop = false;
+  emergencyStop = true;
+  emergencyOverride = false;
+  relayOn = true;
 
   Serial.println("SYSTEM START");
-  Serial.println("EMERGENCY DISTANCE: 100 cm");
-  Serial.println("DOUBLE PRESS: 1000 ms");
+  Serial.println("BRAKE TOGGLE MODE");
+  Serial.println("EMERGENCY OVERRIDE MODE");
+  Serial.println("NO ECHO -> GREEN LED");
+
+  Serial.print("EMERGENCY DISTANCE: ");
+  Serial.print(EMERGENCY_DIST);
+  Serial.println(" cm");
+
+  Serial.print("EMERGENCY RELEASE: ");
+  Serial.print(EMERGENCY_RELEASE_DIST);
+  Serial.println(" cm");
+
+  Serial.println("RELAY ON - INITIAL SAFETY");
 }
 
 // =====================================
-// 메인 반복
+// 16. 메인 루프
 // =====================================
 void loop() {
 
   updateBrake();
-
   updateSensor();
-
-  updateBrake();
-
   updateRelay();
-
-  setLevel(getPriorityLevel());
-
   updateLED();
 }
