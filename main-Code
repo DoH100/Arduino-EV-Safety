@@ -18,8 +18,8 @@
 // =====================================
 // 2. 거리 설정
 // =====================================
-const float EMERGENCY_DIST = 50.0;
-const float EMERGENCY_RELEASE_DIST = 60.0;
+const float EMERGENCY_DIST = 100.0;
+const float EMERGENCY_RELEASE_DIST = 110.0;
 
 const float RED_DIST = 100.0;
 const float ORANGE_DIST = 200.0;
@@ -290,7 +290,7 @@ void updateRelay() {
 // =====================================
 LedLevel getPriorityLevel() {
 
-  // 버튼을 누르는 동안 빨간색 고정
+  // 브레이크 누르는 동안 빨간색 고정
   if (brakePressed) {
     return BRAKE_ACTIVE;
   }
@@ -305,8 +305,18 @@ LedLevel getPriorityLevel() {
     return CRITICAL;
   }
 
-  // 100cm 초과: 주황색 점멸
-  return DANGER;
+  // 100cm 초과 ~ 200cm: 주황색 점멸
+  if (distanceCm <= ORANGE_DIST) {
+    return DANGER;
+  }
+
+  // 200cm 초과 ~ 300cm: 초록색 점멸
+  if (distanceCm <= GREEN_DIST) {
+    return WARNING;
+  }
+
+  // 300cm 초과: LED OFF
+  return SAFE;
 }
 
 // =====================================
