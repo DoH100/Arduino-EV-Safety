@@ -295,9 +295,9 @@ LedLevel getPriorityLevel() {
     return BRAKE_ACTIVE;
   }
 
-  // NO ECHO: 초록색 점멸
+  // NO ECHO: 초록색 상시 점등
   if (!sensorValid) {
-    return WARNING;
+    return SAFE;
   }
 
   // 100cm 이하: 빨간색 점멸
@@ -315,7 +315,7 @@ LedLevel getPriorityLevel() {
     return WARNING;
   }
 
-  // 300cm 초과: LED OFF
+  // 300cm 초과: 초록색 항시 점등
   return SAFE;
 }
 
@@ -345,11 +345,12 @@ void updateLED() {
     blinkOn = false;
   }
 
-  if (level == SAFE) {
+  // 300cm 초과 및 NO ECHO : 초록색 상시 점등
+if (level == SAFE) {
 
-    showColor(strip.Color(0, 0, 0));
-    return;
-  }
+  showColor(strip.Color(0, 255, 0));
+  return;
+}
 
   // 브레이크 누름: 빨간색 고정
   if (level == BRAKE_ACTIVE) {
