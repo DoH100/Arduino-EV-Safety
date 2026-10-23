@@ -18,11 +18,11 @@
 // =====================================
 // 2. 거리 설정
 // =====================================
-const float EMERGENCY_DIST = 100.0;
-const float EMERGENCY_RELEASE_DIST = 110.0;
+const float EMERGENCY_DIST = 150.0;
+const float EMERGENCY_RELEASE_DIST = 160.0;
 
-const float RED_DIST = 100.0;
-const float ORANGE_DIST = 200.0;
+const float RED_DIST = 150.0;
+const float ORANGE_DIST = 300.0;
 const float GREEN_DIST = 300.0;
 
 // =====================================
