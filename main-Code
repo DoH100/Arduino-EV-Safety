@@ -219,7 +219,7 @@ void updateSensor() {
   Serial.println(" cm");
 
   // =================================
-  // 60cm 이상: 긴급제동 해제 및 재무장
+  // 160cm 이상: 긴급제동 해제 및 재무장
   // =================================
   if (distanceCm >= EMERGENCY_RELEASE_DIST) {
 
@@ -236,12 +236,11 @@ void updateSensor() {
   }
 
   // =================================
-  // 50cm 미만: 긴급제동
+  // 150cm 미만: 긴급제동
   // =================================
   else if (distanceCm < EMERGENCY_DIST) {
 
     if (!emergencyOverride) {
-
       if (!emergencyStop) {
         Serial.println("EMERGENCY STOP");
       }
@@ -250,7 +249,7 @@ void updateSensor() {
     }
   }
 
-  // 50~60cm에서는 기존 상태 유지
+  // 150~160cm에서는 기존 상태 유지
 }
 
 // =====================================
@@ -322,12 +321,31 @@ LedLevel getPriorityLevel() {
 // =====================================
 // 13. LED 전체 출력
 // =====================================
+
+// 마지막으로 출력한 LED 색상 저장
+uint32_t lastColor = 0;
+
+// LED 최초 출력 여부
+bool ledInitialized = false;
+
 void showColor(uint32_t color) {
 
+  // 이전에 출력한 색상과 같으면
+  // LED 데이터 재전송하지 않음
+  if (ledInitialized && color == lastColor) {
+    return;
+  }
+
+  // 새로운 색상 저장
+  lastColor = color;
+  ledInitialized = true;
+
+  // LED 180개 색상 설정
   for (int i = 0; i < LED_COUNT; i++) {
     strip.setPixelColor(i, color);
   }
 
+  // 실제 LED에 데이터 전송
   strip.show();
 }
 
