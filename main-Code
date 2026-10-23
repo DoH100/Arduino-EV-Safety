@@ -44,7 +44,6 @@ Adafruit_NeoPixel strip(
 
 enum LedLevel {
   SAFE,
-  WARNING,
   DANGER,
   CRITICAL,
   SENSOR_ERROR,
@@ -384,11 +383,6 @@ if (level == SAFE) {
     case DANGER:
       interval = 150;
       color = strip.Color(255, 80, 0);
-      break;
-
-    case WARNING:
-      interval = 500;
-      color = strip.Color(0, 255, 0);
       break;
 
     case SENSOR_ERROR:
