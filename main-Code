@@ -23,7 +23,6 @@ const float EMERGENCY_RELEASE_DIST = 160.0;
 
 const float RED_DIST = 150.0;
 const float ORANGE_DIST = 300.0;
-const float GREEN_DIST = 300.0;
 
 // =====================================
 // 3. 시간 설정
@@ -299,22 +298,17 @@ LedLevel getPriorityLevel() {
     return SAFE;
   }
 
-  // 100cm 이하: 빨간색 점멸
+  // 150cm 이하: 빨간색 점멸
   if (distanceCm <= RED_DIST) {
     return CRITICAL;
   }
 
-  // 100cm 초과 ~ 200cm: 주황색 점멸
+  // 150cm 초과 ~ 300cm 이하: 주황색 점멸
   if (distanceCm <= ORANGE_DIST) {
     return DANGER;
   }
 
-  // 200cm 초과 ~ 300cm: 초록색 점멸
-  if (distanceCm <= GREEN_DIST) {
-    return WARNING;
-  }
-
-  // 300cm 초과: 초록색 항시 점등
+  // 300cm 초과: 초록색 상시 점등
   return SAFE;
 }
 
