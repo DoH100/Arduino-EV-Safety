@@ -27,7 +27,8 @@ const float ORANGE_DIST = 300.0;
 // =====================================
 // 3. 시간 설정
 // =====================================
-const unsigned long SENSOR_INTERVAL = 300;
+//긴급제동 반응지연시간 고려 시간 줄임
+const unsigned long SENSOR_INTERVAL = 100;
 const unsigned long BRAKE_DEBOUNCE = 30;
 const unsigned long ECHO_TIMEOUT_US = 30000UL;
 
@@ -46,11 +47,11 @@ enum LedLevel {
   SAFE,
   DANGER,
   CRITICAL,
-  SENSOR_ERROR,
   BRAKE_ACTIVE
 };
 
-LedLevel currentLevel = SENSOR_ERROR;
+// 사용하지 않는 SENSOR_ERROR 관련 상태값 제거 및 기본값 정리
+LedLevel currentLevel = SAFE;
 
 unsigned long lastBlinkTime = 0;
 bool blinkOn = false;
@@ -385,11 +386,6 @@ if (level == SAFE) {
       color = strip.Color(255, 80, 0);
       break;
 
-    case SENSOR_ERROR:
-      interval = 250;
-      color = strip.Color(0, 0, 255);
-      break;
-
     default:
       break;
   }
@@ -414,9 +410,10 @@ void setup() {
 
   Serial.begin(9600);
 
-  // 초기 릴레이 ON
-  digitalWrite(RELAY_PIN, RELAY_ON);
+  // 부팅 시 릴레이 오동작 방지
   pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, RELAY_ON);
+  
 
   pinMode(BRAKE_PIN, INPUT_PULLUP);
   pinMode(TRIG_PIN, OUTPUT);
