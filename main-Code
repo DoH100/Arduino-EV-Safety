@@ -89,36 +89,47 @@ bool emergencyOverride = false;
 bool relayOn = true;
 
 // =====================================
-// 8. 초음파 거리 측정
+// 8. 초음파 거리 측정 (3회 측정 후 평균 반영)
 // =====================================
 float readDistance() {
+  const int samples = 3;
+  float validSum = 0;
+  int validCount = 0;
 
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(3);
+  for (int i = 0; i < samples; i++) {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(3);
 
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
 
-  unsigned long duration = pulseIn(
-    ECHO_PIN,
-    HIGH,
-    ECHO_TIMEOUT_US
-  );
+    unsigned long duration = pulseIn(
+      ECHO_PIN,
+      HIGH,
+      ECHO_TIMEOUT_US
+    );
 
-  // 초음파 응답 없음
-  if (duration == 0) {
+    // 응답이 있고 유효 범위(2~400cm)인 경우만 합산
+    if (duration > 0) {
+      float cm = duration * 0.0343 / 2.0;
+      if (cm >= 2.0 && cm <= 400.0) {
+        validSum += cm;
+        validCount++;
+      }
+    }
+    
+    // 측정 간 간섭을 막기 위한 아주 짧은 딜레이 (5ms)
+    delay(5);
+  }
+
+  // 유효한 값이 하나도 없다면 측정 실패(-1 반환)
+  if (validCount == 0) {
     return -1;
   }
 
-  float cm = duration * 0.0343 / 2.0;
-
-  // 측정 범위 오류
-  if (cm < 2.0 || cm > 400.0) {
-    return -1;
-  }
-
-  return cm;
+  // 3번 중 유효했던 값들의 평균 반환
+  return validSum / validCount;
 }
 
 // =====================================
