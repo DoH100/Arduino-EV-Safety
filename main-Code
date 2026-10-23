@@ -89,36 +89,68 @@ bool emergencyOverride = false;
 bool relayOn = true;
 
 // =====================================
-// 8. 초음파 거리 측정
+// 8. 초음파 거리 측정 (3회 측정 후 중앙값 반영)
 // =====================================
 float readDistance() {
+  const int samples = 3;
+  float readings[samples];
+  int validCount = 0;
 
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(3);
+  for (int i = 0; i < samples; i++) {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(3);
 
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
 
-  unsigned long duration = pulseIn(
-    ECHO_PIN,
-    HIGH,
-    ECHO_TIMEOUT_US
-  );
+    unsigned long duration = pulseIn(
+      ECHO_PIN,
+      HIGH,
+      ECHO_TIMEOUT_US
+    );
 
-  // 초음파 응답 없음
-  if (duration == 0) {
+    if (duration > 0) {
+      float cm = duration * 0.0343 / 2.0;
+
+      if (cm >= 2.0 && cm <= 400.0) {
+        readings[validCount] = cm;
+        validCount++;
+      }
+    }
+
+    if (i < samples - 1) {
+      delay(5);
+    }
+  }
+
+  if (validCount == 0) {
     return -1;
   }
 
-  float cm = duration * 0.0343 / 2.0;
-
-  // 측정 범위 오류
-  if (cm < 2.0 || cm > 400.0) {
-    return -1;
+  // 측정값 오름차순 정렬
+  for (int i = 0; i < validCount - 1; i++) {
+    for (int j = i + 1; j < validCount; j++) {
+      if (readings[i] > readings[j]) {
+        float temp = readings[i];
+        readings[i] = readings[j];
+        readings[j] = temp;
+      }
+    }
   }
 
-  return cm;
+  // 유효한 값이 1개면 그대로 반환
+  if (validCount == 1) {
+    return readings[0];
+  }
+
+  // 유효한 값이 2개면 평균 반환
+  if (validCount == 2) {
+    return (readings[0] + readings[1]) / 2.0;
+  }
+
+  // 유효한 값이 3개면 중앙값 반환
+  return readings[1];
 }
 
 // =====================================
