@@ -79,7 +79,7 @@ unsigned long lastDebounceTime = 0;
 bool manualStop = false;
 
 // 긴급제동 상태
-bool emergencyStop = true;
+bool emergencyStop = false;
 
 // 긴급제동 수동 해제 상태
 // true = 긴급제동 일시 해제
@@ -201,14 +201,15 @@ void updateSensor() {
   // =================================
   if (measured < 0) {
 
-    sensorValid = false;
-    distanceCm = -1;
+  sensorValid = false;
+  distanceCm = -1;
 
-    Serial.println("Distance: NO ECHO");
+  Serial.println("Distance: NO ECHO");
 
-    // 기존 긴급제동 상태 유지
-    return;
-  }
+  // 센서가 안 잡힐 때는 오작동 방지를 위해 긴급제동 해제
+  emergencyStop = false;
+  return;
+}
 
   distanceCm = measured;
   sensorValid = true;
